@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // ============================================================================
-// NUEVO: Función inteligente que espera y reintenta si Google nos bloquea (Error 429)
+// NUEVO: Función inteligente que espera y reintenta si Google nos bloquea (Error 429) o se satura (500+)
 // ============================================================================
 async function fetchWithRetry(url, options, maxRetries = 4) {
     let delay = 2000; // Empieza esperando 2 segundos
@@ -24,17 +24,18 @@ async function fetchWithRetry(url, options, maxRetries = 4) {
         
         if (response.ok) return response; // Si funciona, devuelve la respuesta directo
         
-        if (response.status === 429) {
-            console.warn(`⏳ [Advertencia 429] Límite de Google alcanzado. Esperando ${delay/1000}s para reintentar... (Intento ${i+1}/${maxRetries})`);
+        // MEJORA: Ahora reintenta con 429 Y TAMBIÉN con errores 500, 502, 503, 504
+        if (response.status === 429 || response.status >= 500) {
+            console.warn(`⏳ [Advertencia ${response.status}] Servidor ocupado. Esperando ${delay/1000}s para reintentar... (Intento ${i+1}/${maxRetries})`);
             // Si ya agotamos los intentos, ahora sí mostramos el error
             if (i === maxRetries - 1) {
-                throw new Error("Límite de consultas de Google agotado temporalmente. Por favor, intente de nuevo en 1 minuto.");
+                throw new Error(`Los servidores de IA están muy ocupados ahora mismo (Error ${response.status}). Por favor, espere un momento y vuelva a presionar consultar.`);
             }
             // Esperar el tiempo indicado antes de volver a intentar sin decirle nada al usuario
             await new Promise(resolve => setTimeout(resolve, delay));
             delay *= 2; // El próximo intento esperará el doble (2s, 4s, 8s)
         } else {
-            // Si es un error distinto (400, 404, 500), falla inmediatamente
+            // Si es un error distinto (400, 404), falla inmediatamente
             const errorBody = await response.text();
             throw new Error(`Error de Google ${response.status}: ${errorBody}`);
         }
