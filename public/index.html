@@ -229,7 +229,8 @@
         } catch (error) {
             document.getElementById('aiLoaderState').classList.add('hidden');
             document.getElementById('aiEmptyState').classList.remove('hidden');
-            showNotification("Error de conexión con el servidor local: " + error.message, "error");
+            // Eliminamos el texto de "servidor local" para que solo muestre el mensaje limpio
+            showNotification(error.message, "error");
         }
     }
 
