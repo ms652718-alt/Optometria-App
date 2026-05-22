@@ -15,11 +15,37 @@ const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // ============================================================================
+// NUEVO: Función inteligente que espera y reintenta si Google nos bloquea (Error 429)
+// ============================================================================
+async function fetchWithRetry(url, options, maxRetries = 4) {
+    let delay = 2000; // Empieza esperando 2 segundos
+    for (let i = 0; i < maxRetries; i++) {
+        const response = await fetch(url, options);
+        
+        if (response.ok) return response; // Si funciona, devuelve la respuesta directo
+        
+        if (response.status === 429) {
+            console.warn(`⏳ [Advertencia 429] Límite de Google alcanzado. Esperando ${delay/1000}s para reintentar... (Intento ${i+1}/${maxRetries})`);
+            // Si ya agotamos los intentos, ahora sí mostramos el error
+            if (i === maxRetries - 1) {
+                throw new Error("Límite de consultas de Google agotado temporalmente. Por favor, intente de nuevo en 1 minuto.");
+            }
+            // Esperar el tiempo indicado antes de volver a intentar sin decirle nada al usuario
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2; // El próximo intento esperará el doble (2s, 4s, 8s)
+        } else {
+            // Si es un error distinto (400, 404, 500), falla inmediatamente
+            const errorBody = await response.text();
+            throw new Error(`Error de Google ${response.status}: ${errorBody}`);
+        }
+    }
+}
+
+// ============================================================================
 // ENDPOINT 1: Consultor Clínico (Protegido en el Backend)
 // ============================================================================
 app.post('/api/analyze', async (req, res) => {
     try {
-        // Validación de seguridad inicial
         if (!GEMINI_API_KEY || GEMINI_API_KEY === 'undefined') {
             throw new Error("El servidor no está leyendo la clave API. Revisa tu archivo .env");
         }
@@ -46,7 +72,6 @@ app.post('/api/analyze', async (req, res) => {
             "textoLocucionPacientes": "texto"
         }`;
 
-        // Estructura simplificada a prueba de fallos
         const payload = {
             contents: [{ 
                 role: "user",
@@ -57,23 +82,14 @@ app.post('/api/analyze', async (req, res) => {
             }
         };
 
-        // Usamos el modelo moderno y activo (2.5-flash)
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-        const response = await fetch(apiUrl, {
+        // USAMOS LA NUEVA FUNCIÓN CON REINTENTOS EN LUGAR DE FETCH NORMAL
+        const response = await fetchWithRetry(apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-
-        // NUEVO: Si hay error, leemos el mensaje exacto de Google
-        if (!response.ok) {
-            const errorBody = await response.text();
-            console.error("\n>>> ERROR DE GOOGLE GEMINI <<<");
-            console.error(errorBody);
-            console.error(">>>>>>>>>>>>><<<<<<<<<<<<<\n");
-            throw new Error(`Error de Google ${response.status} (Mira la pantalla negra para más detalles)`);
-        }
         
         const result = await response.json();
         const contentText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -105,17 +121,12 @@ app.post('/api/tts', async (req, res) => {
 
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_API_KEY}`;
 
-        const response = await fetch(apiUrl, {
+        // USAMOS LA NUEVA FUNCIÓN AQUÍ TAMBIÉN
+        const response = await fetchWithRetry(apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            console.error("Error TTS Gemini:", errorBody);
-            throw new Error(`Error en TTS: ${response.status}`);
-        }
         
         const result = await response.json();
         res.json({ success: true, data: result });
